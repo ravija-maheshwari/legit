@@ -1,11 +1,14 @@
 #!/usr/bin/perl -w
+#TODO
+#Cases for commands withour init
+#Folders being commited
+
 use strict;
 use Cwd;
 use File::Basename;
+use File::Compare;
+
 #INIT
-#Initialise an empty directory .legit in the curent directory and create an empty dir .legit/index inside it
-#If .legit exists, print legit.pl: error: .legit already exists
-#Else print Initialized empty legit repository in .legit
 sub legit_init(){
     my $curr_dir = getcwd();
     if( -e "$curr_dir/.legit"){
@@ -18,14 +21,15 @@ sub legit_init(){
 }
 
 #ADD [filenames]
-#go through each arg which is a file name, and copy the contents of each fie from the curr dir to .legit/index/filename
-#if filename does not exist in curr dir print legit.pl: error: can not open 'file_name'
-#if filename is not a file print legit.pl: error: 'filename' is not a regular file
-#if there are slashes and stuff print legit.pl: error: invalid filename 'filename'
-
 sub legit_add(){
     shift @ARGV; #remove the add command
     my $curr_dir = getcwd();
+    my $legit_path = "$curr_dir/.legit";
+    if (is_dir_empty($legit_path) == -1){
+        print "legit.pl: error: no .legit directory containing legit repository exists\n";
+        return;
+    }
+    
     foreach my $file (@ARGV){
         #print "File = $file\n";
         if ( (!-e $file) ){ 
@@ -54,9 +58,9 @@ sub legit_add(){
         }
     }
 }
+
 #To check if a directory is empty or not
 #Returns -1 if directory does not exist, -2 if it is not a directory, 0 if not empty, 1 if empty
-#!/usr/bin/perl
 sub is_dir_empty {
     return -1 if not -e $_[0];   # does not exist
     return -2 if not -d $_[0];   # in not a directory
@@ -68,13 +72,60 @@ sub is_dir_empty {
     return 1;
 }
 
-#COMMIT
-#if no -m message specified print usage: legit.pl commit [-a] -m commit-message
-#if index is empty print nothing to commit
-#if succesfully commited print Commited to commit-no
-#go through all files in .legit/index and copy all of them into .legit/commit_num
-#remove all commited files from index
+#Returns 0 if commit not required, else returns 1 
+sub is_commit_required(){
+    OUTER:
+    foreach my $file (glob ".legit/index/*"){
+        #Populating num array with commit numbers of file in descending order
+        my @num_arr; #declared but undefined
+        foreach my $file (glob ".legit/commit_?"){
+            #print "$file\n";
+            $file =~ /commit_([0-9]+)/;
+            my $commit_num = $1;
+            push @num_arr, $commit_num;
+        }  
+        @num_arr = sort {($b) <=> ($a)} @num_arr;
+        print @num_arr;
 
+        if(scalar(@num_arr) == 0){
+            return 1;
+        }
+        #multiple file cases problem
+        while (@num_arr){
+            my $n = shift @num_arr;
+            my $file_found = 0;
+            #print "File found : $file_found\n";
+            foreach my $commit_file (glob ".legit/commit_$n/*"){
+                print "Commit file = $commit_file\n";
+                print "File = $file\n";
+                if(basename($commit_file) eq basename($file)){
+                    $file_found = 1;
+                    print "Basename matches\n";
+                    if(compare($file, $commit_file) != 0){
+                        print "Found not equal!\n";
+                        print "Found not equal Commit file = $commit_file\n";
+                        print "Found not equal File = $file\n";
+                        return 1;
+                    }else{
+                        last OUTER;
+                    }
+                }
+            }
+            if($file_found == 0 and $n == 0){
+                print "new file\n";
+                return 1;
+            }    
+    
+        }
+    }
+    return 0;
+}
+            
+                
+                    
+                    
+    
+#COMMIT
 sub legit_commit(){
     shift @ARGV; #removing the commit arg
     my $arg_m;
@@ -83,18 +134,27 @@ sub legit_commit(){
         if(!($arg_m =~ /^-m$/) or (!($commit_message = shift @ARGV)) ){
             print "usage: legit.pl commit [-a] -m commit-message\n";
         }else{
+            #checking if file in index is the same as last commited version
+           
             my $flag = 0;
             my $commit_dir; 
             my $commit_num = 0;
             my $check_dir = is_dir_empty(".legit/index");
             
             if ($check_dir == 1){
-                print "Nothing to commit\n";
+                print "nothing to commit\n";
             }else{
-                #make a directory for commits
+                if(is_commit_required() == 0){
+                    print "nothing to commit\n";
+                    foreach my $file (glob ".legit/index/*"){
+                        unlink $file;
+                    }
+                    return;
+                }
+
                 while ($flag == 0){
                     $commit_dir = ".legit/commit_$commit_num";
-                    #   print "Commit dir : $commit_dir\n";
+                    #print "Commit dir : $commit_dir\n";
                     if ( -e $commit_dir and -d $commit_dir){
                         $commit_num++;
                         $commit_dir = ".legit/commit_$commit_num";
@@ -125,7 +185,7 @@ sub legit_commit(){
                             open F_W, '>', "$curr_dir/$commit_dir/msg.txt" or die "Couldnt open message file\n";
                             print F_W $commit_message;
                         }
-                        print "Commited as commit $commit_num\n";
+                        print "Committed as commit $commit_num\n";
                         
                     }
                 }      
@@ -139,7 +199,6 @@ sub legit_commit(){
 
 
 #LOG
-
 sub legit_log(){
     my %num_msg; #declared but undefined
     foreach my $file (glob ".legit/commit_?/msg.txt"){
@@ -149,8 +208,7 @@ sub legit_log(){
         open F , '<', $file or die "Can't open commit message file\n";
         my $commit_msg = <F>;
         $num_msg{$commit_num} = $commit_msg;
-    }
-    
+    }  
     if(%num_msg){
         foreach my $i (reverse sort keys %num_msg){
             print "$i $num_msg{$i}\n";
@@ -160,14 +218,128 @@ sub legit_log(){
     }
 }
 
-#for incorrect syntax print usage: legit.pl <commit>:<filename>
-#if no filename specifed/non -existent filename specified print legit.pl: error: invalid filename '$file'
-#if no commits have been made, print legit.pl: error: your repository does not have any commits yet
-#NOTE:if index is empty, and no commit number is given print out the last version (last commit it was in )
-#if file not found print legit.pl: error: '$file' not found in index
-sub legit_show(){
 
+#TBD what happens if commit number is not a number??
+sub legit_show(){
+    shift @ARGV; #remove the show
+    my @vals = split /:/, $ARGV[0];
+    my $commit_num = $vals[0];
+    my $file = $vals[1];
+    if ($commit_num =~ /[0-9]+/){
+        #print "All okay\n";
+    }else{
+        $commit_num = -1;
+        #print "Commit num val is -1\n";
+    }
+    
+    #Checking if the repository has any commits yet
+    my $file_checker = ".legit/commit_0";
+    print "legit.pl: error: your repository does not have any commits yet\n" if ( !(-e $file_checker));
+
+    #If file does not exist anyhwere
+    #if (!(-e $file)){
+        #print "legit.pl: error: invalid filename '$file'\n";
+    if($commit_num == -1){
+        #commit number not specified
+        #print contents of file from index. If index is empty print file contents from last commit it was in
+        my $is_empty = is_dir_empty(".legit/index");
+        if ($is_empty){
+            #print "Index directory is empty\n";
+            
+            my @num_arr; #declared but undefined
+            foreach my $file (glob ".legit/commit_?"){
+            #print "$file\n";
+                $file =~ /commit_([0-9]+)/;
+                my $commit_num = $1;
+                push @num_arr, $commit_num;
+            }  
+            @num_arr = sort {($b) <=> ($a)} @num_arr;
+            my $found = 0;
+            while (@num_arr and $found == 0){
+                my $n = shift @num_arr;
+                foreach (glob ".legit/commit_$n/*"){
+                    if($file eq  basename($_)){
+                        #print "Found!! $_\n";
+                        $found = 1;
+                        open F, '<', $_ or die "Can't open read file\n";
+                        foreach (<F>){
+                            print "$_";
+                        }
+                    }   
+                }
+            }
+
+            if($found == 0){
+                print "legit.pl: error: '$file' not found in index\n";
+            }  
+        }else{
+            #print "Directory not empty\n";
+            foreach my $read_file (glob ".legit/index/*"){
+                if(basename($read_file) eq $file){
+                    open F, '<', $read_file or die "Can't open read file\n";
+                    foreach (<F>){
+                        print "$_";
+                    }
+                }
+            }
+        } 
+    }else{ 
+        #commit number is specified
+        #loop through all files in that commit and find $file
+        #display contents of file
+        #If file not found in that commit print the last commit it was in
+        #print "In else commit num : $commit_num\n";
+        #print "In else File name : $file\n";
+        my $f = ".legit/commit_$commit_num";
+        #print $f."\n";
+        my $found = 0;
+        if(is_dir_empty("$f") == -1){
+            print "legit.pl: error: unknown commit '$commit_num'\n";
+        }else{
+            foreach my $read_file (glob "$f/*"){
+                #print "In for\n";
+                #print "Read file : $read_file\n";
+                if ($found != 1){
+                    if ($file eq basename($read_file)){
+                        open FILE_R, '<', $read_file or die "Cannot open read file\n";
+                        foreach (<FILE_R>){
+                            $found = 1;
+                            print "$_";
+                        }
+                    }
+                }
+            }
+            my $i = 0;
+            if($found == 0){
+                foreach my $read_file (glob ".legit/commit_$i/*"){
+                    #print "File reading = $read_file\n";
+                    #print "File = $file\n";
+                    #print basename($read_file)."\n";
+                    if ($file eq basename($read_file)){
+                        #print "In in\n";
+                        open FILE_R, '<', $read_file or die "Cannot open read file\n";
+                        foreach (<FILE_R>){
+                            $found = 1;
+                            print "$_";
+                        }
+                    }else{
+                        #print "In else\n";
+                        $i++;
+                        #print "i = $i\n";
+                    }
+                    #print "Commit num = $commit_num\n";
+                    last if ($i > $commit_num);
+                }  
+            }
+            print "legit.pl: error: '$file' not found in commit $commit_num\n" if ($found == 0);
+        }
+    }
+    #print $file;
 }
+
+
+
+
 
 #TBD unknown command error message to be printed for all commands if spelled wrong
 if ($ARGV[0] eq "init"){
@@ -178,4 +350,6 @@ if ($ARGV[0] eq "init"){
     legit_commit();
 }elsif($ARGV[0] eq "log"){
     legit_log();
+}elsif($ARGV[0] eq "show"){
+    legit_show();
 }
