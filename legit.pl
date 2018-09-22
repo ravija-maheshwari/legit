@@ -7,7 +7,8 @@ use strict;
 use Cwd;
 use File::Basename;
 use File::Compare;
-
+use Data::Dumper;
+use File::Copy;
 #INIT
 sub legit_init(){
     my $curr_dir = getcwd();
@@ -85,7 +86,7 @@ sub is_commit_required(){
             push @num_arr, $commit_num;
         }  
         @num_arr = sort {($b) <=> ($a)} @num_arr;
-        print @num_arr;
+        #print @num_arr;
 
         if(scalar(@num_arr) == 0){
             return 1;
@@ -96,15 +97,15 @@ sub is_commit_required(){
             my $file_found = 0;
             #print "File found : $file_found\n";
             foreach my $commit_file (glob ".legit/commit_$n/*"){
-                print "Commit file = $commit_file\n";
-                print "File = $file\n";
+                #print "Commit file = $commit_file\n";
+                #print "File = $file\n";
                 if(basename($commit_file) eq basename($file)){
                     $file_found = 1;
-                    print "Basename matches\n";
+                    #print "Basename matches\n";
                     if(compare($file, $commit_file) != 0){
-                        print "Found not equal!\n";
-                        print "Found not equal Commit file = $commit_file\n";
-                        print "Found not equal File = $file\n";
+                        #print "Found not equal!\n";
+                        #print "Found not equal Commit file = $commit_file\n";
+                        #print "Found not equal File = $file\n";
                         return 1;
                     }else{
                         last OUTER;
@@ -112,7 +113,7 @@ sub is_commit_required(){
                 }
             }
             if($file_found == 0 and $n == 0){
-                print "new file\n";
+                #print "new file\n";
                 return 1;
             }    
     
@@ -126,8 +127,7 @@ sub is_commit_required(){
                     
     
 #COMMIT
-sub legit_commit(){
-    shift @ARGV; #removing the commit arg
+sub legit_commit_M(){
     my $arg_m;
     my $commit_message;
     if ($arg_m = shift @ARGV) {
@@ -196,7 +196,82 @@ sub legit_commit(){
     }
 }
 
+#Parameters : file name
+#Returns the latest commited version of given file
+sub getLatestCommitedVersion{
+    #go through all files in commits reverse order and compare to received_file
+    #if find received file return
+    #else return NULL
+    my ($file_received) = @_;
+    my @num_arr; 
+    foreach my $file (glob ".legit/commit_?"){
+        $file =~ /commit_([0-9]+)/;
+        my $commit_num = $1;
+        push @num_arr, $commit_num;
+    }  
+    @num_arr = sort {($b) <=> ($a)} @num_arr;
 
+    my $file_found = 0;
+    while (@num_arr){
+        my $n = shift @num_arr;
+        foreach my $commits_file (glob ".legit/commit_$n/*"){
+            #print "Commits file = $commits_file\n";
+            #print "File received = $file_received\n";
+            if(basename($commits_file) eq basename($file_received)){
+                print "File Found!\n";
+                $file_found = 1;
+                return $commits_file;
+                last;
+            }
+        }
+    }
+    
+    if($file_found == 0){
+        #print "File not found in any commit folder\n";
+        return -1;
+    }
+}
+
+
+sub legit_commit_A(){
+    my $arg_a;
+    my $arg_m;
+    my $commit_message;
+    if ($arg_a = $ARGV[0] and $arg_m = $ARGV[1]) {
+        if(!($arg_a =~ /^-a$/) or (!($arg_m =~ /^-m$/)) or (!($commit_message = $ARGV[2])) ){
+            print "usage: legit.pl commit [-a] -m commit-message\n";
+        }else{
+            my $curr_dir = getcwd();
+            foreach my $cwd_file (glob "$curr_dir/*"){
+                #print "Curr dir = $cwd_file\n";
+                my $is_copied = 0;
+                foreach my $index_file (glob ".legit/index/*"){
+                    #print "Curr index file = $index_file\n";
+                    if(basename($index_file) eq basename($cwd_file) and compare($index_file,$cwd_file) != 0){
+                        #print "Copying\n";
+                        unlink $index_file;
+                        $is_copied = 1;
+                        copy($cwd_file, $index_file) or die "Couldn't copy\n";
+                        next;
+                    }
+                }
+                if($is_copied == 0){
+                    my $latestCommit_file  = getLatestCommitedVersion($cwd_file);
+                    #print "Latest Commit file = $latestCommit_file\n";
+                    if($latestCommit_file ne -1){
+                        if(compare($latestCommit_file, $cwd_file) != 0){
+                            #print "Latest commit file not equal to cwd file\n";
+                            copy($cwd_file, ".legit/index");
+                        }
+                    }
+                }
+            }
+            #removing the -m
+            shift @ARGV;
+            legit_commit_M();
+        }
+    }
+}
 
 #LOG
 sub legit_log(){
@@ -347,7 +422,14 @@ if ($ARGV[0] eq "init"){
 }elsif($ARGV[0] eq "add"){
     legit_add();
 }elsif($ARGV[0] eq "commit"){
-    legit_commit();
+    shift @ARGV; #removing the commit arg
+    my $arg = $ARGV[0];
+    #print "Arg = $arg";
+    if($arg =~ /^-m$/){
+        legit_commit_M();
+    }else{
+        legit_commit_A();
+    }
 }elsif($ARGV[0] eq "log"){
     legit_log();
 }elsif($ARGV[0] eq "show"){
